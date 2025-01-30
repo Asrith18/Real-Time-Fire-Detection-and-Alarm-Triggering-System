@@ -1,0 +1,179 @@
+import cv2
+import time
+import smtplib
+import os
+import playsound 
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.application import MIMEApplication
+from threading import Thread
+
+video_recording_flag = False
+alarm_on = False
+email_on = False
+alarm_triggered = False
+
+def play_alarm_sound_function():
+    global alarm_triggered
+ # defined function to play alarm post fire detection using threading
+    # playsound.playsound(r'C:/Users/yashaswi/Desktop/FIRE DETECTOR-finalyr-project/fire detection 100_/Alarm_Sound.mp3',True) # to play alarm # mp3 audio file is also provided with the code.
+    # print("Fire alarm end") # to print in console
+    while True:
+        if alarm_triggered:
+            playsound.playsound('Alarm_Sound.mp3', True)
+        else:
+            break
+
+    print("Fire alarm end")
+    time.sleep(0.1)
+
+
+def send_mail_function(video_path): # defined function to send mail post fire detection using threading
+     
+    # Send an email with the recorded video as an attachment
+    sender_email = 'firedetectionalertmessage@gmail.com'  # replace with your sender email address
+    #sender_password = 'wssqavcudjxbocgx'  # replace with your sender email password
+    sender_password = 'zkebcehygpuxztaf'
+    recipient_email = 'venkatasaiasrith2004@gmail.com'
+    #recipient_email = 'venkatasaiasrith2004@gmail.com  # replace with the recipient email address
+    subject = 'Fire Detected!'
+    message = 'A fire has been detected. Please find attached a video of the incident.'
+    
+    try:
+        with open(video_path, 'rb') as f:
+            video_data = f.read()
+        
+        message_body = f"""\
+From: {sender_email}
+To: {recipient_email}
+Subject: {subject}
+
+{message}
+"""
+        
+        message_with_attachment = MIMEMultipart()
+        message_with_attachment.attach(MIMEText(message_body, 'plain'))
+        
+        filename = os.path.basename(video_path)
+        attachment = MIMEApplication(video_data, _subtype='mp4', _encoder=smtplib.email.encoders.encode_base64)
+        attachment.add_header('content-disposition', 'attachment', filename=filename)
+        message_with_attachment.attach(attachment)
+        
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+            smtp.login(sender_email, sender_password)
+            smtp.sendmail(sender_email, recipient_email, message_with_attachment.as_string())
+        
+        print('Email sent successfully!')
+    except Exception as e:
+        print(e) # To print error if any
+
+def record_video_pls(vid):
+    # start recording video for specified duration
+    global video_recording_flag
+    global email_on 
+    #vid = cv2.VideoCapture(0)
+    time.sleep(2)
+    video_length = 5
+    frame_width = int(vid.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps = int(vid.get(cv2.CAP_PROP_FPS))
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    video_path = 'fire_detected_video.mp4'
+    out = cv2.VideoWriter(video_path, fourcc, fps, (frame_width, frame_height))
+
+    start_time = time.time()
+    while (time.time() - start_time) < video_length:
+        ret, frame = vid.read()
+        if ret:
+            out.write(frame)
+            cv2.imshow('frame', frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+    out.release()
+
+    # send email with video attachment
+    if not email_on:
+        print("einside the mail_on if condition")
+        email_on = True
+        send_mail_function(video_path)
+        print("email_fun is triggered")
+
+    else:
+        print("email_on is false")
+
+    t3 = Thread(target=video_record_flag_value,daemon=True)
+    t3.start()
+    #t1.join()
+    
+def video_record_flag_value():
+    global video_recording_flag
+    print("inside the sleep time 5 mins")
+    time.sleep(300)  # wait for 5 minutes
+    video_recording_flag = False
+    print("sleep time 5 mins completed")
+
+
+def main():
+    # initialize video capture object and fire cascade classifier
+    vid = cv2.VideoCapture(0)
+    fire_cascade = cv2.CascadeClassifier('fire_detection_cascade_model.xml') 
+
+    # initialize alarm and email settings
+    global alarm_on 
+    global email_on 
+    global video_recording_flag
+    global alarm_triggered
+    
+
+    while True:
+        # read video frame and convert to grayscale
+        if not vid.isOpened():
+            print("Error: Could not open video capture device")
+            exit()
+
+        ret, frame = vid.read()
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        # detect fire and highlight with square
+        fire = fire_cascade.detectMultiScale(frame, 1.2, 5)
+        for (x,y,w,h) in fire:
+            cv2.rectangle(frame,(x-20,y-20),(x+w+20,y+h+20),(255,0,0),2)
+            roi_gray = gray[y:y+h, x:x+w]
+            roi_color = frame[y:y+h, x:x+w]
+
+
+            t1 = Thread(target=record_video_pls, args=(vid,),daemon=True)
+            t2 = Thread(target=play_alarm_sound_function,daemon=True)
+
+
+            # play alarm sound
+            if not alarm_on:
+                alarm_on = True
+                alarm_triggered= True
+                #play_alarm_sound_function()
+                t2.start()
+            if not video_recording_flag:
+                # set the flag to True
+                video_recording_flag = True
+                t1.start()
+
+
+        # stop alarm and reset email settings if no fire is detected
+        if len(fire) == 0:
+            if alarm_on:
+                alarm_on = False
+                alarm_triggered= False
+                # stop playing alarm sound
+            if email_on:
+                email_on = False
+
+        # display video frame with fire detection results
+        cv2.imshow('Fire Detection', frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    vid.release()
+    cv2.destroyAllWindows()
+
+if __name__ == '__main__':
+    main()
